@@ -762,6 +762,10 @@
                 </div>
             </div>
             <div class="header-actions">
+                <a href="#" id="dashboardBtn" style="position: relative;">
+                    Dashboard
+                    <span id="creditsBadge" style="display: none; margin-left: 8px; background: #ffffff; color: #000000; padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 500;">$0.00</span>
+                </a>
                 <a href="/api">API Docs</a>
                 <a href="https://github.com" target="_blank">GitHub</a>
             </div>
@@ -997,35 +1001,199 @@
                 <div class="page-header">
                     <h1 class="page-title">API Documentation</h1>
                     <p class="page-description">
-                        Integrate Passiv Leads into your applications via our REST API.
+                        Integrate Passiv Leads into your applications via our REST API. All endpoints require API key authentication.
                     </p>
                 </div>
 
+                <!-- Authentication Section -->
                 <div class="card">
-                    <h2 class="card-title">Endpoint: Find Emails</h2>
-                    <div class="api-docs">
-                        <div class="api-endpoint">
-                            <span class="api-method">POST</span> /api/find-emails
+                    <h2 class="card-title">Authentication</h2>
+                    <p style="margin-bottom: 15px;">All API endpoints require authentication via API key. Include your API key in the request header:</p>
+                    <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <code style="color: #ffffff;">X-API-Key: your_api_key_here</code>
+                    </div>
+                    <p style="margin-bottom: 15px;">Or as a query parameter:</p>
+                    <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <code style="color: #ffffff;">?api_key=your_api_key_here</code>
+                    </div>
+                    <p style="color: #b0b0b0; font-size: 12px;">Get your API key from the Dashboard section.</p>
+                </div>
+
+                <!-- Service Costs -->
+                <div class="card">
+                    <h2 class="card-title">Service Costs</h2>
+                    <div style="margin-bottom: 20px;">
+                        <p style="margin-bottom: 15px;">Each API request consumes credits. Costs per service:</p>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid #ffffff;">
+                                    <th style="padding: 10px; text-align: left; color: #ffffff;">Service</th>
+                                    <th style="padding: 10px; text-align: left; color: #ffffff;">Endpoint</th>
+                                    <th style="padding: 10px; text-align: right; color: #ffffff;">Cost (USD)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr style="border-bottom: 1px solid #2d2d2d;">
+                                    <td style="padding: 10px; color: #e0e0e0;">Email Finder</td>
+                                    <td style="padding: 10px; color: #e0e0e0;">/api/v1/email-finder</td>
+                                    <td style="padding: 10px; text-align: right; color: #ffffff;">$0.01</td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid #2d2d2d;">
+                                    <td style="padding: 10px; color: #e0e0e0;">Email Finder CSV</td>
+                                    <td style="padding: 10px; color: #e0e0e0;">/api/v1/email-finder/csv</td>
+                                    <td style="padding: 10px; text-align: right; color: #ffffff;">$0.05</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px; color: #e0e0e0;">OpenStreetMap Scraper</td>
+                                    <td style="padding: 10px; color: #e0e0e0;">/api/v1/osm-scraper</td>
+                                    <td style="padding: 10px; text-align: right; color: #ffffff;">$0.02</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; border-left: 3px solid #ffffff;">
+                        <strong style="color: #ffffff;">New users receive $1.00 in free credits to get started!</strong>
+                    </div>
+                </div>
+
+                <!-- Email Finder Endpoint -->
+                <div class="card">
+                    <h2 class="card-title">Email Finder</h2>
+                    <div style="margin-bottom: 20px;">
+                        <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <span style="background: #ffffff; color: #000000; padding: 4px 8px; border-radius: 4px; font-weight: 500; font-size: 11px; margin-right: 10px;">POST</span>
+                            <code style="color: #ffffff; font-size: 14px;">/api/v1/email-finder</code>
+                            <span style="color: #b0b0b0; margin-left: 10px; font-size: 12px;">Cost: $0.01</span>
                         </div>
-                        <div>
-                            <span class="api-param">url</span>: string (required)<br>
-                            <span class="api-param">max_pages</span>: number (optional, default: 50)<br>
-                            <span class="api-param">timeout</span>: number (optional, default: 10)
+                        <p style="margin-bottom: 15px;">Find all email addresses from a single website URL.</p>
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Request Body:</h3>
+                        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; border: 1px solid #ffffff; margin-bottom: 15px;">
+                            <pre style="color: #ffffff; margin: 0; font-size: 12px; overflow-x: auto;"><code>{
+  "url": "https://example.com",
+  "max_pages": 10,
+  "timeout": 10
+}</code></pre>
+                        </div>
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Parameters:</h3>
+                        <ul style="color: #e0e0e0; font-size: 13px; line-height: 1.8;">
+                            <li><strong style="color: #ffffff;">url</strong> (required): Website URL to scrape</li>
+                            <li><strong style="color: #ffffff;">max_pages</strong> (optional): Maximum pages to crawl (default: 10, max: 500)</li>
+                            <li><strong style="color: #ffffff;">timeout</strong> (optional): Request timeout in seconds (default: 10)</li>
+                        </ul>
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Response:</h3>
+                        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; border: 1px solid #ffffff; margin-bottom: 15px;">
+                            <pre style="color: #ffffff; margin: 0; font-size: 12px; overflow-x: auto;"><code>{
+  "success": true,
+  "url": "https://example.com",
+  "emails": ["contact@example.com", "info@example.com"],
+  "total_emails": 2,
+  "pages_scraped": 5,
+  "credits_used": 0.01,
+  "remaining_credits": 0.99
+}</code></pre>
+                        </div>
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Example (cURL):</h3>
+                        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; border: 1px solid #ffffff;">
+                            <pre style="color: #ffffff; margin: 0; font-size: 12px; overflow-x: auto;"><code>curl -X POST https://your-api.onrender.com/api/v1/email-finder \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'</code></pre>
                         </div>
                     </div>
                 </div>
 
+                <!-- Email Finder CSV Endpoint -->
                 <div class="card">
-                    <h2 class="card-title">Endpoint: Process CSV</h2>
-                    <div class="api-docs">
-                        <div class="api-endpoint">
-                            <span class="api-method">POST</span> /api/process-csv
+                    <h2 class="card-title">Email Finder CSV</h2>
+                    <div style="margin-bottom: 20px;">
+                        <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <span style="background: #ffffff; color: #000000; padding: 4px 8px; border-radius: 4px; font-weight: 500; font-size: 11px; margin-right: 10px;">POST</span>
+                            <code style="color: #ffffff; font-size: 14px;">/api/v1/email-finder/csv</code>
+                            <span style="color: #b0b0b0; margin-left: 10px; font-size: 12px;">Cost: $0.05</span>
                         </div>
-                        <div>
-                            <span class="api-param">file</span>: file (required, CSV format)<br>
-                            <span class="api-param">max_pages</span>: number (optional, default: 50)<br>
-                            <span class="api-param">timeout</span>: number (optional, default: 10)<br>
-                            <span class="api-param">url_column</span>: string (optional, default: "url")
+                        <p style="margin-bottom: 15px;">Process a CSV file with multiple URLs and return enriched CSV with emails.</p>
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Request:</h3>
+                        <p style="color: #e0e0e0; font-size: 13px; margin-bottom: 10px;">Upload a CSV file via multipart/form-data:</p>
+                        <ul style="color: #e0e0e0; font-size: 13px; line-height: 1.8;">
+                            <li><strong style="color: #ffffff;">file</strong> (required): CSV file with URL column</li>
+                            <li>URL column is automatically detected</li>
+                        </ul>
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Example (cURL):</h3>
+                        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; border: 1px solid #ffffff;">
+                            <pre style="color: #ffffff; margin: 0; font-size: 12px; overflow-x: auto;"><code>curl -X POST https://your-api.onrender.com/api/v1/email-finder/csv \
+  -H "X-API-Key: your_api_key" \
+  -F "file=@urls.csv" \
+  -o results.csv</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- OSM Scraper Endpoint -->
+                <div class="card">
+                    <h2 class="card-title">OpenStreetMap Scraper</h2>
+                    <div style="margin-bottom: 20px;">
+                        <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <span style="background: #ffffff; color: #000000; padding: 4px 8px; border-radius: 4px; font-weight: 500; font-size: 11px; margin-right: 10px;">POST</span>
+                            <code style="color: #ffffff; font-size: 14px;">/api/v1/osm-scraper</code>
+                            <span style="color: #b0b0b0; margin-left: 10px; font-size: 12px;">Cost: $0.02</span>
+                        </div>
+                        <p style="margin-bottom: 15px;">Scrape business data from OpenStreetMap for a specific city.</p>
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Request Body:</h3>
+                        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; border: 1px solid #ffffff; margin-bottom: 15px;">
+                            <pre style="color: #ffffff; margin: 0; font-size: 12px; overflow-x: auto;"><code>{
+  "city": "London",
+  "company_types": ["restaurant", "cafe", "shop"],
+  "bbox": [51.0, -0.5, 51.5, 0.5]
+}</code></pre>
+                        </div>
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Parameters:</h3>
+                        <ul style="color: #e0e0e0; font-size: 13px; line-height: 1.8;">
+                            <li><strong style="color: #ffffff;">city</strong> (required): City name to scrape</li>
+                            <li><strong style="color: #ffffff;">company_types</strong> (required): Array of company types (e.g., ["restaurant", "cafe"])</li>
+                            <li><strong style="color: #ffffff;">bbox</strong> (optional): Bounding box [min_lat, min_lon, max_lat, max_lon]</li>
+                        </ul>
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Example (cURL):</h3>
+                        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; border: 1px solid #ffffff;">
+                            <pre style="color: #ffffff; margin: 0; font-size: 12px; overflow-x: auto;"><code>curl -X POST https://your-api.onrender.com/api/v1/osm-scraper \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"city": "London", "company_types": ["restaurant"]}'</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Account Management Endpoints -->
+                <div class="card">
+                    <h2 class="card-title">Account Management</h2>
+                    <div style="margin-bottom: 20px;">
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px;">Get Credits Balance</h3>
+                        <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <span style="background: #ffffff; color: #000000; padding: 4px 8px; border-radius: 4px; font-weight: 500; font-size: 11px; margin-right: 10px;">GET</span>
+                            <code style="color: #ffffff; font-size: 14px;">/api/v1/account/credits</code>
+                        </div>
+                        
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Get Usage Statistics</h3>
+                        <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <span style="background: #ffffff; color: #000000; padding: 4px 8px; border-radius: 4px; font-weight: 500; font-size: 11px; margin-right: 10px;">GET</span>
+                            <code style="color: #ffffff; font-size: 14px;">/api/v1/account/usage?days=30</code>
+                        </div>
+                        
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Get Usage Logs</h3>
+                        <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <span style="background: #ffffff; color: #000000; padding: 4px 8px; border-radius: 4px; font-weight: 500; font-size: 11px; margin-right: 10px;">GET</span>
+                            <code style="color: #ffffff; font-size: 14px;">/api/v1/account/logs?limit=100&offset=0</code>
+                        </div>
+                        
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Get API Keys</h3>
+                        <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <span style="background: #ffffff; color: #000000; padding: 4px 8px; border-radius: 4px; font-weight: 500; font-size: 11px; margin-right: 10px;">GET</span>
+                            <code style="color: #ffffff; font-size: 14px;">/api/v1/account/api-keys</code>
+                        </div>
+                        
+                        <h3 style="font-size: 14px; color: #ffffff; margin-bottom: 10px; margin-top: 20px;">Create API Key</h3>
+                        <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <span style="background: #ffffff; color: #000000; padding: 4px 8px; border-radius: 4px; font-weight: 500; font-size: 11px; margin-right: 10px;">POST</span>
+                            <code style="color: #ffffff; font-size: 14px;">/api/v1/account/api-keys</code>
                         </div>
                     </div>
                 </div>
@@ -1089,6 +1257,94 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard Modal -->
+    <div id="dashboardModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); z-index: 10000; overflow-y: auto;">
+        <div style="max-width: 1200px; margin: 40px auto; padding: 20px;">
+            <div style="background: #1a1a1a; border-radius: 16px; border: 1px solid #ffffff; padding: 40px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+                    <h1 style="font-size: 24px; color: #ffffff; margin: 0;">Dashboard</h1>
+                    <button id="closeDashboard" style="background: transparent; border: 1px solid #ffffff; color: #ffffff; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;">Close</button>
+                </div>
+
+                <!-- Credits Section -->
+                <div class="card" style="margin-bottom: 30px;">
+                    <h2 class="card-title">Credits</h2>
+                    <div style="display: flex; align-items: center; gap: 30px; margin-bottom: 20px;">
+                        <div>
+                            <div style="font-size: 36px; font-weight: 500; color: #ffffff;" id="dashboardCredits">$0.00</div>
+                            <div style="font-size: 13px; color: #b0b0b0; margin-top: 5px;">Available Credits</div>
+                        </div>
+                        <button id="addCreditsBtn" style="background: #ffffff; color: #000000; border: 1px solid #ffffff; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 13px;">Add Credits</button>
+                    </div>
+                    <div style="background: #2d2d2d; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                        <div style="font-size: 12px; color: #b0b0b0; margin-bottom: 10px;">Recent Transactions</div>
+                        <div id="transactionsList" style="max-height: 200px; overflow-y: auto;"></div>
+                    </div>
+                </div>
+
+                <!-- API Keys Section -->
+                <div class="card" style="margin-bottom: 30px;">
+                    <h2 class="card-title">API Keys</h2>
+                    <div style="margin-bottom: 20px;">
+                        <button id="createApiKeyBtn" style="background: #ffffff; color: #000000; border: 1px solid #ffffff; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 13px;">Create New API Key</button>
+                    </div>
+                    <div id="apiKeysList" style="margin-top: 20px;"></div>
+                </div>
+
+                <!-- Usage Statistics -->
+                <div class="card" style="margin-bottom: 30px;">
+                    <h2 class="card-title">Usage Statistics (Last 30 Days)</h2>
+                    <div id="usageStats" style="margin-top: 20px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+                            <div style="background: #2d2d2d; padding: 20px; border-radius: 8px;">
+                                <div style="font-size: 24px; font-weight: 500; color: #ffffff;" id="totalRequests">0</div>
+                                <div style="font-size: 12px; color: #b0b0b0; margin-top: 5px;">Total Requests</div>
+                            </div>
+                            <div style="background: #2d2d2d; padding: 20px; border-radius: 8px;">
+                                <div style="font-size: 24px; font-weight: 500; color: #ffffff;" id="totalCost">$0.00</div>
+                                <div style="font-size: 12px; color: #b0b0b0; margin-top: 5px;">Total Cost</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Usage Logs -->
+                <div class="card">
+                    <h2 class="card-title">Usage Logs</h2>
+                    <div style="margin-top: 20px; max-height: 400px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid #ffffff;">
+                                    <th style="padding: 10px; text-align: left; color: #ffffff; font-size: 12px;">Date</th>
+                                    <th style="padding: 10px; text-align: left; color: #ffffff; font-size: 12px;">Service</th>
+                                    <th style="padding: 10px; text-align: left; color: #ffffff; font-size: 12px;">Endpoint</th>
+                                    <th style="padding: 10px; text-align: right; color: #ffffff; font-size: 12px;">Cost</th>
+                                    <th style="padding: 10px; text-align: center; color: #ffffff; font-size: 12px;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usageLogsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Credits Modal -->
+    <div id="addCreditsModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); z-index: 10001; align-items: center; justify-content: center;">
+        <div style="background: #1a1a1a; border-radius: 16px; border: 1px solid #ffffff; padding: 30px; max-width: 400px; width: 90%;">
+            <h2 style="font-size: 18px; color: #ffffff; margin-bottom: 20px;">Add Credits</h2>
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; color: #ffffff; font-size: 13px; margin-bottom: 8px;">Amount (USD)</label>
+                <input type="number" id="creditAmount" step="0.01" min="0.01" value="10.00" style="width: 100%; padding: 10px; border: 1px solid #ffffff; border-radius: 8px; background: #1a1a1a; color: #ffffff; font-size: 14px;">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button id="confirmAddCredits" style="flex: 1; background: #ffffff; color: #000000; border: 1px solid #ffffff; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px;">Add</button>
+                <button id="cancelAddCredits" style="flex: 1; background: transparent; border: 1px solid #ffffff; color: #ffffff; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px;">Cancel</button>
             </div>
         </div>
     </div>
@@ -1922,6 +2178,187 @@
 
         // Make removeType available globally
         window.removeType = removeType;
+
+        // Dashboard functionality
+        let dashboardData = null;
+
+        // Initialize dashboard on page load
+        async function initDashboard() {
+            try {
+                const response = await fetch('/api/dashboard/init');
+                const data = await response.json();
+                dashboardData = data;
+                
+                // Update credits badge
+                const creditsBadge = document.getElementById('creditsBadge');
+                if (creditsBadge) {
+                    creditsBadge.textContent = `$${data.credits.toFixed(2)}`;
+                    creditsBadge.style.display = 'inline-block';
+                }
+            } catch (err) {
+                console.error('Error initializing dashboard:', err);
+            }
+        }
+
+        // Open dashboard
+        document.getElementById('dashboardBtn').addEventListener('click', async (e) => {
+            e.preventDefault();
+            await loadDashboard();
+            document.getElementById('dashboardModal').style.display = 'block';
+        });
+
+        // Close dashboard
+        document.getElementById('closeDashboard').addEventListener('click', () => {
+            document.getElementById('dashboardModal').style.display = 'none';
+        });
+
+        // Load dashboard data
+        async function loadDashboard() {
+            try {
+                const response = await fetch('/api/dashboard/init');
+                const data = await response.json();
+                dashboardData = data;
+                
+                // Update credits
+                document.getElementById('dashboardCredits').textContent = `$${data.credits.toFixed(2)}`;
+                
+                // Update transactions
+                const transactionsList = document.getElementById('transactionsList');
+                transactionsList.innerHTML = '';
+                if (data.transactions && data.transactions.length > 0) {
+                    data.transactions.slice(0, 10).forEach(t => {
+                        const div = document.createElement('div');
+                        div.style.cssText = 'padding: 8px; border-bottom: 1px solid #2d2d2d; font-size: 12px;';
+                        const sign = t.amount > 0 ? '+' : '';
+                        const color = t.amount > 0 ? '#ffffff' : '#b0b0b0';
+                        div.innerHTML = `
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: #e0e0e0;">${t.description || t.transaction_type}</span>
+                                <span style="color: ${color}; font-weight: 500;">${sign}$${Math.abs(t.amount).toFixed(4)}</span>
+                            </div>
+                            <div style="color: #808080; font-size: 11px; margin-top: 4px;">${new Date(t.created_at).toLocaleString()}</div>
+                        `;
+                        transactionsList.appendChild(div);
+                    });
+                } else {
+                    transactionsList.innerHTML = '<div style="color: #808080; font-size: 12px; padding: 10px;">No transactions yet</div>';
+                }
+                
+                // Update API keys
+                const apiKeysList = document.getElementById('apiKeysList');
+                apiKeysList.innerHTML = '';
+                if (data.api_keys && data.api_keys.length > 0) {
+                    data.api_keys.forEach(key => {
+                        const div = document.createElement('div');
+                        div.style.cssText = 'background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 10px;';
+                        div.innerHTML = `
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <div style="color: #ffffff; font-size: 13px; font-weight: 500;">${key.name || 'API Key'}</div>
+                                    <div style="color: #808080; font-size: 11px; margin-top: 4px;">Created: ${new Date(key.created_at).toLocaleDateString()}</div>
+                                </div>
+                                <div style="color: #808080; font-size: 11px;">${key.is_active ? 'Active' : 'Inactive'}</div>
+                            </div>
+                        `;
+                        apiKeysList.appendChild(div);
+                    });
+                } else {
+                    apiKeysList.innerHTML = '<div style="color: #808080; font-size: 12px; padding: 10px;">No API keys yet. Create one to start using the API.</div>';
+                }
+                
+                // Update usage stats
+                document.getElementById('totalRequests').textContent = data.stats.total_requests || 0;
+                document.getElementById('totalCost').textContent = `$${(data.stats.total_cost || 0).toFixed(4)}`;
+                
+                // Update logs
+                const logsBody = document.getElementById('usageLogsTableBody');
+                logsBody.innerHTML = '';
+                if (data.logs && data.logs.length > 0) {
+                    data.logs.forEach(log => {
+                        const tr = document.createElement('tr');
+                        tr.style.cssText = 'border-bottom: 1px solid #2d2d2d;';
+                        const statusColor = log.status_code === 200 ? '#ffffff' : '#ff6666';
+                        tr.innerHTML = `
+                            <td style="padding: 10px; color: #e0e0e0; font-size: 12px;">${new Date(log.created_at).toLocaleString()}</td>
+                            <td style="padding: 10px; color: #e0e0e0; font-size: 12px;">${log.service}</td>
+                            <td style="padding: 10px; color: #e0e0e0; font-size: 12px;">${log.endpoint}</td>
+                            <td style="padding: 10px; text-align: right; color: #ffffff; font-size: 12px;">$${log.cost.toFixed(4)}</td>
+                            <td style="padding: 10px; text-align: center; color: ${statusColor}; font-size: 12px;">${log.status_code}</td>
+                        `;
+                        logsBody.appendChild(tr);
+                    });
+                } else {
+                    logsBody.innerHTML = '<tr><td colspan="5" style="padding: 20px; text-align: center; color: #808080; font-size: 12px;">No usage logs yet</td></tr>';
+                }
+            } catch (err) {
+                console.error('Error loading dashboard:', err);
+            }
+        }
+
+        // Create API key
+        document.getElementById('createApiKeyBtn').addEventListener('click', async () => {
+            const name = prompt('Enter a name for this API key:', 'My API Key');
+            if (!name) return;
+            
+            try {
+                const response = await fetch('/api/dashboard/create-api-key', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                
+                const data = await response.json();
+                if (response.ok) {
+                    alert(`API Key created!\n\n${data.api_key}\n\nSave this key securely. It will not be shown again.`);
+                    await loadDashboard();
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to create API key'));
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        });
+
+        // Add credits modal
+        document.getElementById('addCreditsBtn').addEventListener('click', () => {
+            const modal = document.getElementById('addCreditsModal');
+            modal.style.display = 'flex';
+        });
+
+        document.getElementById('cancelAddCredits').addEventListener('click', () => {
+            document.getElementById('addCreditsModal').style.display = 'none';
+        });
+
+        document.getElementById('confirmAddCredits').addEventListener('click', async () => {
+            const amount = parseFloat(document.getElementById('creditAmount').value);
+            if (!amount || amount <= 0) {
+                alert('Please enter a valid amount');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/dashboard/add-credits', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount })
+                });
+                
+                const data = await response.json();
+                if (response.ok) {
+                    document.getElementById('addCreditsModal').style.display = 'none';
+                    await loadDashboard();
+                    await initDashboard(); // Update badge
+                    alert(`Successfully added $${amount.toFixed(2)} credits!`);
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to add credits'));
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        });
+
+        // Initialize dashboard on page load
+        initDashboard();
     </script>
 </body>
 </html>

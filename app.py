@@ -4,7 +4,7 @@ API Flask pour Email Finder Bot
 Déployable sur Render
 """
 
-from flask import Flask, request, jsonify, send_file, render_template_string, Response, stream_with_context
+from flask import Flask, request, jsonify, send_file, render_template_string, Response, stream_with_context, session
 from flask_cors import CORS
 import logging
 import csv
@@ -17,8 +17,10 @@ from urllib.parse import urlparse
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from functools import wraps
 from email_finder import EmailFinder
 from osm_scraper import OSMScraper
+from database import Database
 
 # Configuration du logging
 logging.basicConfig(
@@ -29,7 +31,65 @@ logger = logging.getLogger(__name__)
 
 # Créer l'application Flask
 app = Flask(__name__)
+app.secret_key = 'passivleads-secret-key-change-in-production'
 CORS(app)  # Permettre les requêtes CORS
+
+# Initialize database
+db = Database()
+
+# Service costs (in USD)
+SERVICE_COSTS = {
+    'email_finder': 0.01,  # $0.01 per URL
+    'email_finder_csv': 0.05,  # $0.05 per CSV file
+    'osm_scraper': 0.02,  # $0.02 per city scrape
+}
+
+def require_api_key(f):
+    """Decorator to require API key authentication"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
+        
+        if not api_key:
+            return jsonify({
+                'error': 'API key required',
+                'message': 'Please provide your API key via X-API-Key header or api_key parameter'
+            }), 401
+        
+        user_info = db.validate_api_key(api_key)
+        if not user_info:
+            return jsonify({
+                'error': 'Invalid API key',
+                'message': 'The provided API key is invalid or inactive'
+            }), 401
+        
+        # Attach user info to request
+        request.user_info = user_info
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
+def check_credits_and_deduct(service: str, cost: float):
+    """Check if user has enough credits and deduct them"""
+    user_id = request.user_info['user_id']
+    current_credits = db.get_user_credits(user_id)
+    
+    if current_credits < cost:
+        return False, jsonify({
+            'error': 'Insufficient credits',
+            'message': f'You need ${cost:.4f} credits but only have ${current_credits:.4f}',
+            'current_credits': current_credits,
+            'required_credits': cost
+        }), 402
+    
+    success = db.deduct_credits(user_id, cost, f'{service} API usage')
+    if not success:
+        return False, jsonify({
+            'error': 'Failed to deduct credits',
+            'message': 'An error occurred while processing your request'
+        }), 500
+    
+    return True, None, None
 
 # Route de santé pour vérifier que l'API fonctionne
 @app.route('/health', methods=['GET'])
@@ -1166,6 +1226,373 @@ def scrape_osm_stream():
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
     
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+# ============================================
+# API V1 ENDPOINTS (with authentication)
+# ============================================
+
+@app.route('/api/v1/email-finder', methods=['POST'])
+@require_api_key
+def api_v1_email_finder():
+    """
+    API V1: Find emails from a single URL
+    Requires: X-API-Key header
+    Cost: $0.01 per request
+    """
+    try:
+        data = request.get_json() or {}
+        url = data.get('url')
+        
+        if not url:
+            return jsonify({'error': 'URL is required', 'message': 'Please provide a URL in the request body'}), 400
+        
+        # Check credits
+        cost = SERVICE_COSTS['email_finder']
+        success, error_response, error_code = check_credits_and_deduct('email_finder', cost)
+        if not success:
+            return error_response, error_code
+        
+        # Parse parameters
+        max_pages = data.get('max_pages', 10)
+        timeout = data.get('timeout', 10)
+        
+        # Validate URL
+        try:
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                db.add_credits(request.user_info['user_id'], cost, 'Refund for invalid URL')
+                return jsonify({'error': 'Invalid URL', 'message': 'URL must include http:// or https://'}), 400
+        except Exception as e:
+            db.add_credits(request.user_info['user_id'], cost, 'Refund for invalid URL')
+            return jsonify({'error': 'Invalid URL', 'message': str(e)}), 400
+        
+        # Scrape emails
+        finder = EmailFinder(url, max_pages=max_pages, timeout=timeout)
+        results = finder.crawl()
+        
+        # Log usage
+        db.log_usage(
+            request.user_info.get('api_key_id'),
+            request.user_info['user_id'],
+            'email_finder',
+            '/api/v1/email-finder',
+            cost,
+            200,
+            json.dumps({'url': url, 'max_pages': max_pages}),
+            json.dumps({'total_emails': results['total_emails']})
+        )
+        
+        return jsonify({
+            'success': True,
+            'url': url,
+            'emails': results['emails_found'],
+            'total_emails': results['total_emails'],
+            'pages_scraped': results['pages_scraped'],
+            'credits_used': cost,
+            'remaining_credits': db.get_user_credits(request.user_info['user_id'])
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in API v1 email finder: {e}", exc_info=True)
+        # Refund credits on error
+        db.add_credits(request.user_info['user_id'], cost, 'Refund for error')
+        return jsonify({'error': 'Server error', 'message': str(e)}), 500
+
+@app.route('/api/v1/email-finder/csv', methods=['POST'])
+@require_api_key
+def api_v1_email_finder_csv():
+    """
+    API V1: Process CSV file with URLs
+    Requires: X-API-Key header
+    Cost: $0.05 per CSV file
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided', 'message': 'Please upload a CSV file'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Check credits
+        cost = SERVICE_COSTS['email_finder_csv']
+        success, error_response, error_code = check_credits_and_deduct('email_finder_csv', cost)
+        if not success:
+            return error_response, error_code
+        
+        # Process CSV
+        csv_content = file.read().decode('utf-8')
+        csv_reader = csv.DictReader(io.StringIO(csv_content))
+        rows = list(csv_reader)
+        
+        if not rows:
+            db.add_credits(request.user_info['user_id'], cost, 'Refund for empty CSV')
+            return jsonify({'error': 'Empty CSV', 'message': 'CSV file is empty'}), 400
+        
+        # Detect URL column
+        url_column = detect_url_column(rows[:5])
+        if not url_column:
+            db.add_credits(request.user_info['user_id'], cost, 'Refund for invalid CSV')
+            return jsonify({'error': 'No URL column found', 'message': 'Could not detect URL column in CSV'}), 400
+        
+        # Process URLs
+        results = []
+        for row in rows:
+            url = row.get(url_column, '').strip()
+            if url:
+                try:
+                    finder = EmailFinder(url, max_pages=10, timeout=10)
+                    email_results = finder.crawl()
+                    found_emails = list(email_results['emails_found'])
+                    row['email'] = '\n'.join(found_emails) if found_emails else ''
+                except Exception as e:
+                    row['email'] = f'Error: {str(e)}'
+            
+            results.append(row)
+        
+        # Create output CSV
+        output = io.StringIO()
+        if results:
+            fieldnames = list(results[0].keys())
+            csv_writer = csv.DictWriter(output, fieldnames=fieldnames)
+            csv_writer.writeheader()
+            csv_writer.writerows(results)
+        
+        csv_output = output.getvalue()
+        
+        # Log usage
+        db.log_usage(
+            request.user_info.get('api_key_id'),
+            request.user_info['user_id'],
+            'email_finder_csv',
+            '/api/v1/email-finder/csv',
+            cost,
+            200,
+            json.dumps({'rows': len(rows)}),
+            json.dumps({'rows_processed': len(results)})
+        )
+        
+        return send_file(
+            io.BytesIO(csv_output.encode('utf-8')),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name='results_with_emails.csv'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in API v1 CSV processing: {e}", exc_info=True)
+        cost = SERVICE_COSTS['email_finder_csv']
+        db.add_credits(request.user_info['user_id'], cost, 'Refund for error')
+        return jsonify({'error': 'Server error', 'message': str(e)}), 500
+
+@app.route('/api/v1/osm-scraper', methods=['POST'])
+@require_api_key
+def api_v1_osm_scraper():
+    """
+    API V1: Scrape OpenStreetMap data for a city
+    Requires: X-API-Key header
+    Cost: $0.02 per request
+    """
+    try:
+        data = request.get_json() or {}
+        city = data.get('city')
+        company_types = data.get('company_types', [])
+        bbox = data.get('bbox')
+        
+        if not city:
+            return jsonify({'error': 'City is required', 'message': 'Please provide a city name'}), 400
+        
+        if not company_types:
+            return jsonify({'error': 'Company types required', 'message': 'Please provide at least one company type'}), 400
+        
+        # Check credits
+        cost = SERVICE_COSTS['osm_scraper']
+        success, error_response, error_code = check_credits_and_deduct('osm_scraper', cost)
+        if not success:
+            return error_response, error_code
+        
+        # Convert bbox if provided
+        bbox_tuple = None
+        if bbox and isinstance(bbox, list) and len(bbox) == 4:
+            bbox_tuple = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+        
+        # Scrape
+        scraper = OSMScraper(city, bbox=bbox_tuple, timeout=30)
+        if not bbox_tuple:
+            bbox_tuple = scraper.geocode_city()
+            if not bbox_tuple:
+                db.add_credits(request.user_info['user_id'], cost, 'Refund for geocoding failure')
+                return jsonify({'error': 'Geocoding failed', 'message': f'Could not geocode city: {city}'}), 400
+        
+        companies = scraper.scrape_companies(company_types)
+        
+        # Log usage
+        db.log_usage(
+            request.user_info.get('api_key_id'),
+            request.user_info['user_id'],
+            'osm_scraper',
+            '/api/v1/osm-scraper',
+            cost,
+            200,
+            json.dumps({'city': city, 'company_types': company_types}),
+            json.dumps({'companies_found': len(companies)})
+        )
+        
+        return jsonify({
+            'success': True,
+            'city': city,
+            'companies': companies,
+            'total_companies': len(companies),
+            'credits_used': cost,
+            'remaining_credits': db.get_user_credits(request.user_info['user_id'])
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in API v1 OSM scraper: {e}", exc_info=True)
+        cost = SERVICE_COSTS['osm_scraper']
+        db.add_credits(request.user_info['user_id'], cost, 'Refund for error')
+        return jsonify({'error': 'Server error', 'message': str(e)}), 500
+
+# ============================================
+# API MANAGEMENT ENDPOINTS
+# ============================================
+
+@app.route('/api/v1/account/credits', methods=['GET'])
+@require_api_key
+def get_account_credits():
+    """Get current credit balance"""
+    user_id = request.user_info['user_id']
+    credits = db.get_user_credits(user_id)
+    
+    return jsonify({
+        'credits': credits,
+        'currency': 'USD'
+    }), 200
+
+@app.route('/api/v1/account/usage', methods=['GET'])
+@require_api_key
+def get_account_usage():
+    """Get usage statistics"""
+    user_id = request.user_info['user_id']
+    days = request.args.get('days', 30, type=int)
+    stats = db.get_user_usage_stats(user_id, days)
+    
+    return jsonify(stats), 200
+
+@app.route('/api/v1/account/logs', methods=['GET'])
+@require_api_key
+def get_account_logs():
+    """Get usage logs"""
+    user_id = request.user_info['user_id']
+    limit = request.args.get('limit', 100, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    logs = db.get_user_logs(user_id, limit, offset)
+    
+    return jsonify({'logs': logs}), 200
+
+@app.route('/api/v1/account/api-keys', methods=['GET'])
+@require_api_key
+def get_api_keys():
+    """Get all API keys for user"""
+    user_id = request.user_info['user_id']
+    keys = db.get_user_api_keys(user_id)
+    
+    return jsonify({'api_keys': keys}), 200
+
+@app.route('/api/v1/account/api-keys', methods=['POST'])
+@require_api_key
+def create_api_key():
+    """Create a new API key"""
+    user_id = request.user_info['user_id']
+    data = request.get_json() or {}
+    name = data.get('name', 'API Key')
+    
+    api_key, _ = db.create_api_key(user_id, name)
+    
+    return jsonify({
+        'api_key': api_key,
+        'name': name,
+        'message': 'Save this API key securely. It will not be shown again.'
+    }), 201
+
+@app.route('/api/v1/account/transactions', methods=['GET'])
+@require_api_key
+def get_transactions():
+    """Get credit transactions"""
+    user_id = request.user_info['user_id']
+    limit = request.args.get('limit', 50, type=int)
+    transactions = db.get_credit_transactions(user_id, limit)
+    
+    return jsonify({'transactions': transactions}), 200
+
+# ============================================
+# WEB DASHBOARD ENDPOINTS
+# ============================================
+
+@app.route('/api/dashboard/init', methods=['GET'])
+def dashboard_init():
+    """Initialize dashboard session (for web interface)"""
+    # Create a default user if session doesn't exist
+    if 'user_id' not in session:
+        # Create default user for web interface
+        user_id = db.create_user('web_user', 'web@passivleads.com')
+        session['user_id'] = user_id
+        session['username'] = 'web_user'
+    
+    user_id = session['user_id']
+    credits = db.get_user_credits(user_id)
+    api_keys = db.get_user_api_keys(user_id)
+    stats = db.get_user_usage_stats(user_id, 30)
+    transactions = db.get_credit_transactions(user_id, 20)
+    logs = db.get_user_logs(user_id, 50)
+    
+    return jsonify({
+        'user_id': user_id,
+        'username': session.get('username', 'web_user'),
+        'credits': credits,
+        'api_keys': api_keys,
+        'stats': stats,
+        'transactions': transactions,
+        'logs': logs
+    }), 200
+
+@app.route('/api/dashboard/create-api-key', methods=['POST'])
+def dashboard_create_api_key():
+    """Create API key from dashboard"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.get_json() or {}
+    name = data.get('name', 'Web API Key')
+    
+    user_id = session['user_id']
+    api_key, _ = db.create_api_key(user_id, name)
+    
+    return jsonify({
+        'api_key': api_key,
+        'name': name
+    }), 201
+
+@app.route('/api/dashboard/add-credits', methods=['POST'])
+def dashboard_add_credits():
+    """Add credits to account (for testing/admin)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.get_json() or {}
+    amount = float(data.get('amount', 0))
+    
+    if amount <= 0:
+        return jsonify({'error': 'Invalid amount'}), 400
+    
+    user_id = session['user_id']
+    db.add_credits(user_id, amount, 'Manual credit addition')
+    
+    return jsonify({
+        'success': True,
+        'credits_added': amount,
+        'new_balance': db.get_user_credits(user_id)
+    }), 200
 
 # Route pour la documentation API
 @app.route('/api', methods=['GET'])
