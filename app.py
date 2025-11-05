@@ -13,6 +13,7 @@ import json
 import time
 import re
 import requests
+import os
 from urllib.parse import urlparse
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -31,11 +32,20 @@ logger = logging.getLogger(__name__)
 
 # Créer l'application Flask
 app = Flask(__name__)
-app.secret_key = 'passivleads-secret-key-change-in-production'
+# Use environment variable for secret key in production, fallback for development
+app.secret_key = os.environ.get('SECRET_KEY', 'passivleads-secret-key-change-in-production')
 CORS(app)  # Permettre les requêtes CORS
 
+# Configure for production
+if os.environ.get('FLASK_ENV') == 'production':
+    app.config['DEBUG'] = False
+else:
+    app.config['DEBUG'] = False  # Keep debug off even in development for security
+
 # Initialize database
-db = Database()
+# On Render, use a writable path if needed, otherwise use current directory
+db_path = os.environ.get('DATABASE_PATH', 'passivleads.db')
+db = Database(db_path)
 
 # Service costs (in USD)
 SERVICE_COSTS = {
