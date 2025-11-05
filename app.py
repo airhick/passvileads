@@ -97,7 +97,23 @@ def health():
     """Endpoint de santé"""
     return jsonify({
         'status': 'healthy',
-        'service': 'Email Finder API'
+        'service': 'Passiv Leads API'
+    }), 200
+
+# Test endpoint to verify routes are registered
+@app.route('/api/test-routes', methods=['GET'])
+def test_routes():
+    """Test endpoint to verify all routes are registered"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            'endpoint': rule.endpoint,
+            'methods': list(rule.methods),
+            'path': rule.rule
+        })
+    return jsonify({
+        'routes': routes,
+        'autocomplete_city_exists': any('autocomplete-city' in r['path'] for r in routes)
     }), 200
 
 # Route principale pour trouver les emails
@@ -614,6 +630,7 @@ def process_csv():
 
 # Route pour l'interface web avec formulaire CSV
 @app.route('/', methods=['GET'])
+@app.route('/dashboard', methods=['GET'])
 def index():
     """Interface web pour uploader un CSV"""
     # Lire le template depuis le fichier
@@ -984,9 +1001,12 @@ def autocomplete_city():
     Returns:
     JSON avec liste de suggestions de villes
     """
+    logger.info(f"Autocomplete city endpoint called with query: {request.args.get('query', '')}")
     try:
         query = request.args.get('query', '').strip()
         limit = request.args.get('limit', 5, type=int)
+        
+        logger.info(f"Processing autocomplete request for query: '{query}', limit: {limit}")
         
         if not query or len(query) < 2:
             return jsonify({
@@ -1011,39 +1031,76 @@ def autocomplete_city():
         
         data = response.json()
         
+        # Vérifier que data est une liste
+        if not isinstance(data, list):
+            logger.warning(f"Unexpected response format from Nominatim: {type(data)}")
+            return jsonify({
+                'suggestions': [],
+                'error': 'Unexpected response format'
+            }), 200
+        
         suggestions = []
         for item in data:
-            # Construire le nom complet de la ville
-            display_name = item.get('display_name', '')
-            # Extraire juste le nom de la ville et le pays
-            name_parts = display_name.split(',')
-            city_name = name_parts[0].strip() if name_parts else display_name
-            
-            # Extraire le pays
-            country = ''
-            if len(name_parts) > 1:
-                country = name_parts[-1].strip()
-            
-            suggestions.append({
-                'name': city_name,
-                'full_name': display_name,
-                'country': country,
-                'lat': float(item.get('lat', 0)),
-                'lon': float(item.get('lon', 0)),
-                'boundingbox': item.get('boundingbox', [])
-            })
+            try:
+                # Construire le nom complet de la ville
+                display_name = item.get('display_name', '')
+                if not display_name:
+                    continue
+                    
+                # Extraire juste le nom de la ville et le pays
+                name_parts = display_name.split(',')
+                city_name = name_parts[0].strip() if name_parts else display_name
+                
+                # Extraire le pays
+                country = ''
+                if len(name_parts) > 1:
+                    country = name_parts[-1].strip()
+                
+                # Extraire les coordonnées avec gestion d'erreur
+                try:
+                    lat = float(item.get('lat', 0))
+                    lon = float(item.get('lon', 0))
+                except (ValueError, TypeError):
+                    lat = 0.0
+                    lon = 0.0
+                
+                suggestions.append({
+                    'name': city_name,
+                    'full_name': display_name,
+                    'country': country,
+                    'lat': lat,
+                    'lon': lon,
+                    'boundingbox': item.get('boundingbox', [])
+                })
+            except Exception as e:
+                logger.warning(f"Error processing suggestion item: {e}")
+                continue
         
         return jsonify({
             'suggestions': suggestions
         }), 200
         
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout during autocomplete for query: {query}")
+        return jsonify({
+            'error': 'Timeout',
+            'message': 'Request to geocoding service timed out',
+            'suggestions': []
+        }), 200  # Return 200 to avoid breaking the UI
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request error during autocomplete: {e}")
+        return jsonify({
+            'error': 'Network error',
+            'message': 'Could not connect to geocoding service',
+            'suggestions': []
+        }), 200  # Return 200 to avoid breaking the UI
     except Exception as e:
         logger.error(f"Erreur lors de l'autocomplete: {e}", exc_info=True)
         return jsonify({
             'error': 'Server error',
-            'message': 'An error occurred during autocomplete',
+            'message': str(e),
             'suggestions': []
-        }), 500
+        }), 200  # Return 200 to avoid breaking the UI
 
 # Route pour géocoder une ville et obtenir son bbox avec détails
 @app.route('/api/geocode-city', methods=['GET', 'POST'])
@@ -1077,7 +1134,8 @@ def geocode_city():
             'format': 'json',
             'limit': 1,
             'addressdetails': 1,
-            'polygon_geojson': 1  # Obtenir les polygones pour les limites
+            'polygon_geojson': 1,  # Obtenir les polygones pour les limites
+            'polygon_threshold': 0.1  # Niveau de détail du polygone
         }
         headers = {
             'User-Agent': 'PassivLeads/1.0'
@@ -1117,6 +1175,27 @@ def geocode_city():
         
         # Obtenir le polygone si disponible (pour les limites administratives)
         geojson = location.get('geojson')
+        
+        # Si pas de geojson, essayer de récupérer via une requête plus spécifique
+        if not geojson:
+            # Essayer une recherche plus spécifique pour obtenir les limites
+            params_detail = {
+                'q': city,
+                'format': 'json',
+                'limit': 1,
+                'addressdetails': 1,
+                'polygon_geojson': 1,
+                'polygon_threshold': 0.05,  # Plus de détails
+                'extratags': 1
+            }
+            try:
+                response_detail = requests.get(url, params=params_detail, headers=headers, timeout=15)
+                if response_detail.status_code == 200:
+                    detail_data = response_detail.json()
+                    if detail_data and len(detail_data) > 0:
+                        geojson = detail_data[0].get('geojson')
+            except Exception as e:
+                logger.warning(f"Could not fetch detailed GeoJSON for {city}: {e}")
         
         return jsonify({
             'success': True,
