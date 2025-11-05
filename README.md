@@ -23,6 +23,39 @@ Un bot Python qui scrape un site web pour trouver tous les emails présents, y c
 pip install -r requirements.txt
 ```
 
+## Test en local
+
+### Méthode rapide (recommandée)
+
+**Sur macOS/Linux :**
+```bash
+./start_local.sh
+```
+
+**Sur Windows :**
+```cmd
+start_local.bat
+```
+
+### Méthode manuelle
+
+1. Installer les dépendances :
+```bash
+pip install -r requirements.txt
+```
+
+2. Démarrer le serveur :
+```bash
+python app.py
+```
+
+3. Ouvrir dans le navigateur :
+```
+http://localhost:5000
+```
+
+📖 **Guide détaillé** : Voir [TEST_LOCAL.md](TEST_LOCAL.md) pour plus d'informations et de dépannage.
+
 ## Utilisation
 
 ### En ligne de commande
@@ -310,3 +343,4 @@ curl "https://votre-service.onrender.com/api"
 Ce projet est fourni tel quel, sans garantie.
 
 # email_finder
+# passvileads
