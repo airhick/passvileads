@@ -22,6 +22,7 @@ from functools import wraps
 from email_finder import EmailFinder
 from osm_scraper import OSMScraper
 from database import Database
+from auto_marketer import AutoMarketer
 
 # Configuration du logging
 logging.basicConfig(
@@ -52,6 +53,7 @@ SERVICE_COSTS = {
     'email_finder': 0.01,  # $0.01 per URL
     'email_finder_csv': 0.05,  # $0.05 per CSV file
     'osm_scraper': 0.02,  # $0.02 per city scrape
+    'auto_marketer': 0.10,  # $0.10 per campaign setup
 }
 
 def require_api_key(f):
@@ -1682,6 +1684,248 @@ def dashboard_add_credits():
         'credits_added': amount,
         'new_balance': db.get_user_credits(user_id)
     }), 200
+
+# ============================================
+# AUTO MARKETER ENDPOINTS
+# ============================================
+
+@app.route('/api/v1/auto-marketer/start', methods=['POST'])
+@require_api_key
+def auto_marketer_start():
+    """
+    API V1: Start auto marketing campaign
+    Requires: X-API-Key header
+    Cost: $0.10 per campaign
+    
+    POST body:
+    {
+        "company_url": "https://example.com",
+        "social_credentials": {
+            "instagram": {"username": "...", "password": "..."},
+            "tiktok": {"username": "...", "password": "..."},
+            "pinterest": {"email": "...", "password": "..."},
+            "reddit": {"client_id": "...", "client_secret": "...", "username": "...", "password": "..."},
+            "x": {"api_key": "..."}
+        }
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        company_url = data.get('company_url')
+        
+        if not company_url:
+            return jsonify({'error': 'company_url is required'}), 400
+        
+        # Check credits
+        cost = SERVICE_COSTS['auto_marketer']
+        success, error_response, error_code = check_credits_and_deduct('auto_marketer', cost)
+        if not success:
+            return error_response, error_code
+        
+        # Validate URL
+        try:
+            parsed = urlparse(company_url)
+            if not parsed.scheme or not parsed.netloc:
+                db.add_credits(request.user_info['user_id'], cost, 'Refund for invalid URL')
+                return jsonify({'error': 'Invalid URL', 'message': 'URL must include http:// or https://'}), 400
+        except Exception as e:
+            db.add_credits(request.user_info['user_id'], cost, 'Refund for invalid URL')
+            return jsonify({'error': 'Invalid URL', 'message': str(e)}), 400
+        
+        # Setup campaign
+        social_credentials = data.get('social_credentials', {})
+        marketer = AutoMarketer(company_url, db=db)
+        result = marketer.setup_campaign(
+            user_id=request.user_info['user_id'],
+            social_credentials=social_credentials
+        )
+        
+        if not result.get('success'):
+            db.add_credits(request.user_info['user_id'], cost, 'Refund for campaign setup failure')
+            return jsonify({'error': 'Campaign setup failed', 'message': result.get('error')}), 500
+        
+        # Log usage
+        db.log_usage(
+            request.user_info.get('api_key_id'),
+            request.user_info['user_id'],
+            'auto_marketer',
+            '/api/v1/auto-marketer/start',
+            cost,
+            200,
+            json.dumps({'company_url': company_url}),
+            json.dumps({'campaign_id': result.get('campaign_id')})
+        )
+        
+        return jsonify({
+            'success': True,
+            'campaign_id': result.get('campaign_id'),
+            'company_url': company_url,
+            'analysis': result.get('analysis'),
+            'credits_used': cost,
+            'remaining_credits': db.get_user_credits(request.user_info['user_id'])
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in auto marketer start: {e}", exc_info=True)
+        cost = SERVICE_COSTS['auto_marketer']
+        db.add_credits(request.user_info['user_id'], cost, 'Refund for error')
+        return jsonify({'error': 'Server error', 'message': str(e)}), 500
+
+@app.route('/api/v1/auto-marketer/post-comment', methods=['POST'])
+@require_api_key
+def auto_marketer_post_comment():
+    """
+    API V1: Post a comment on a social media post
+    Requires: X-API-Key header
+    
+    POST body:
+    {
+        "campaign_id": 123,
+        "platform": "instagram",
+        "post_url": "https://instagram.com/p/...",
+        "context": "optional context about the post"
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        campaign_id = data.get('campaign_id')
+        platform = data.get('platform')
+        post_url = data.get('post_url')
+        context = data.get('context', '')
+        
+        if not campaign_id or not platform or not post_url:
+            return jsonify({'error': 'campaign_id, platform, and post_url are required'}), 400
+        
+        # Get campaign
+        campaign = db.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        
+        if campaign['user_id'] != request.user_info['user_id']:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Create marketer instance
+        marketer = AutoMarketer(campaign['company_url'], db=db)
+        marketer.campaign_id = campaign_id
+        
+        # Restore analysis from campaign
+        if campaign.get('company_offerings'):
+            import json as json_lib
+            offerings = json_lib.loads(campaign['company_offerings'])
+            marketer.analysis = {
+                'field': campaign.get('company_field', 'general'),
+                'offerings': offerings,
+                'summary': campaign.get('analysis_summary', '')
+            }
+        
+        # Post comment
+        result = marketer.post_comment_on_post(platform, post_url, context, user_id=request.user_info['user_id'])
+        
+        return jsonify(result), 200 if result.get('success') else 500
+        
+    except Exception as e:
+        logger.error(f"Error posting comment: {e}", exc_info=True)
+        return jsonify({'error': 'Server error', 'message': str(e)}), 500
+
+@app.route('/api/v1/auto-marketer/campaigns', methods=['GET'])
+@require_api_key
+def auto_marketer_get_campaigns():
+    """Get all campaigns for the user"""
+    user_id = request.user_info['user_id']
+    campaigns = db.get_user_campaigns(user_id)
+    
+    return jsonify({'campaigns': campaigns}), 200
+
+@app.route('/api/v1/auto-marketer/campaigns/<int:campaign_id>', methods=['GET'])
+@require_api_key
+def auto_marketer_get_campaign(campaign_id):
+    """Get a specific campaign"""
+    campaign = db.get_campaign(campaign_id)
+    
+    if not campaign:
+        return jsonify({'error': 'Campaign not found'}), 404
+    
+    if campaign['user_id'] != request.user_info['user_id']:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    # Get comments for this campaign
+    comments = db.get_campaign_comments(campaign_id)
+    stats = db.get_comment_stats(campaign_id=campaign_id)
+    
+    return jsonify({
+        'campaign': campaign,
+        'comments': comments,
+        'stats': stats
+    }), 200
+
+@app.route('/api/v1/auto-marketer/comments', methods=['GET'])
+@require_api_key
+def auto_marketer_get_comments():
+    """Get all comments posted by the user"""
+    user_id = request.user_info['user_id']
+    limit = request.args.get('limit', 100, type=int)
+    comments = db.get_user_comments(user_id, limit)
+    
+    return jsonify({'comments': comments}), 200
+
+@app.route('/api/v1/auto-marketer/stats', methods=['GET'])
+@require_api_key
+def auto_marketer_get_stats():
+    """Get statistics about posted comments"""
+    user_id = request.user_info['user_id']
+    campaign_id = request.args.get('campaign_id', type=int)
+    
+    if campaign_id:
+        stats = db.get_comment_stats(campaign_id=campaign_id)
+    else:
+        stats = db.get_comment_stats(user_id=user_id)
+    
+    return jsonify({'stats': stats}), 200
+
+# Web dashboard endpoints (no API key required)
+@app.route('/api/dashboard/auto-marketer/campaigns', methods=['GET'])
+def dashboard_auto_marketer_campaigns():
+    """Get campaigns for web dashboard"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session['user_id']
+    campaigns = db.get_user_campaigns(user_id)
+    
+    return jsonify({'campaigns': campaigns}), 200
+
+@app.route('/api/dashboard/auto-marketer/comments', methods=['GET'])
+def dashboard_auto_marketer_comments():
+    """Get comments for web dashboard"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session['user_id']
+    campaign_id = request.args.get('campaign_id', type=int)
+    limit = request.args.get('limit', 100, type=int)
+    
+    if campaign_id:
+        comments = db.get_campaign_comments(campaign_id, limit)
+    else:
+        comments = db.get_user_comments(user_id, limit)
+    
+    return jsonify({'comments': comments}), 200
+
+@app.route('/api/dashboard/auto-marketer/stats', methods=['GET'])
+def dashboard_auto_marketer_stats():
+    """Get stats for web dashboard"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session['user_id']
+    campaign_id = request.args.get('campaign_id', type=int)
+    
+    if campaign_id:
+        stats = db.get_comment_stats(campaign_id=campaign_id)
+    else:
+        stats = db.get_comment_stats(user_id=user_id)
+    
+    return jsonify({'stats': stats}), 200
 
 # Route pour la documentation API
 @app.route('/api', methods=['GET'])

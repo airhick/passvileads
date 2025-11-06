@@ -767,6 +767,14 @@
                     </span>
                     <span>OpenStreetMap Scraper</span>
                 </div>
+                <div class="sidebar-item" data-tool="auto-marketer">
+                    <span class="sidebar-item-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M23 3l-10 9-3-3-9 9-3-3 9-9-3-3 9-10z"></path>
+                        </svg>
+                    </span>
+                    <span>Auto Marketer</span>
+                </div>
             </div>
         </div>
 
@@ -1074,6 +1082,45 @@
                     </div>
                 </div>
 
+                <!-- Auto Marketer Tool -->
+                <div class="tool-content" id="auto-marketer-content" style="display: none;">
+                    <div class="page-header">
+                        <div style="background: #0d1520; padding: 20px 24px; border-radius: 16px; border: 1px solid #ffffff; margin-bottom: 16px;">
+                            <h1 style="font-size: 24px; font-weight: 500; color: #ffffff; margin-bottom: 12px; letter-spacing: 0.3px;">Auto Marketer</h1>
+                            <p style="font-size: 14px; color: #ffffff; line-height: 1.7; margin: 0;">
+                                Automatically market your company by posting promotional comments on social media. Enter your company website, and the bot will analyze it, identify your field and offerings, then post comments on TikTok, Instagram, X, Pinterest, and Reddit.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Start Campaign -->
+                    <div class="card" style="margin-bottom: 20px;">
+                        <h2 class="card-title">Start New Campaign</h2>
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; color: #ffffff; margin-bottom: 8px; font-size: 14px;">Company Website URL:</label>
+                            <input type="text" id="companyUrl" placeholder="https://example.com" style="width: 100%; padding: 12px; background: #152028; border: 1px solid #ffffff; border-radius: 8px; color: #ffffff; font-size: 14px; margin-bottom: 15px;">
+                        </div>
+                        <button id="startCampaignBtn" style="width: 100%; padding: 12px; background: #ffffff; color: #000000; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer;">Start Campaign</button>
+                        <div id="campaignStatus" style="margin-top: 15px; display: none; padding: 12px; border-radius: 8px; background: #152028; border: 1px solid #ffffff;"></div>
+                    </div>
+
+                    <!-- Campaigns List -->
+                    <div class="card" style="margin-bottom: 20px;">
+                        <h2 class="card-title">Your Campaigns</h2>
+                        <div id="campaignsList" style="color: #e0e8f0;">
+                            <p style="text-align: center; padding: 20px; color: #888;">No campaigns yet. Start a new campaign above.</p>
+                        </div>
+                    </div>
+
+                    <!-- Comments Tracking -->
+                    <div class="card">
+                        <h2 class="card-title">Posted Comments</h2>
+                        <div id="commentsList" style="color: #e0e8f0;">
+                            <p style="text-align: center; padding: 20px; color: #888;">No comments posted yet.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Account Management Endpoints -->
                 <div class="card">
                     <h2 class="card-title">Account Management</h2>
@@ -1289,8 +1336,170 @@
                 if (toolName === 'email-finder') {
                     setTimeout(setupFileInputListeners, 100);
                 }
+                
+                // Load campaigns and comments if Auto Marketer is active
+                if (toolName === 'auto-marketer') {
+                    loadCampaigns();
+                    loadComments();
+                }
             });
         });
+        
+        // Auto Marketer Functions
+        async function loadCampaigns() {
+            try {
+                const response = await fetch('/api/dashboard/auto-marketer/campaigns');
+                const data = await response.json();
+                
+                const campaignsList = document.getElementById('campaignsList');
+                if (!campaignsList) return;
+                
+                if (data.campaigns && data.campaigns.length > 0) {
+                    campaignsList.innerHTML = data.campaigns.map(campaign => `
+                        <div style="padding: 15px; border-bottom: 1px solid #ffffff; margin-bottom: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                                <div>
+                                    <h3 style="color: #ffffff; font-size: 16px; margin-bottom: 5px;">${campaign.company_url}</h3>
+                                    <p style="color: #b0c4d8; font-size: 12px; margin: 0;">Field: ${campaign.company_field || 'N/A'} | Created: ${new Date(campaign.created_at).toLocaleDateString()}</p>
+                                </div>
+                                <span style="background: ${campaign.status === 'active' ? '#28a745' : '#6c757d'}; color: #ffffff; padding: 4px 8px; border-radius: 4px; font-size: 11px;">${campaign.status}</span>
+                            </div>
+                            <p style="color: #e0e8f0; font-size: 13px; margin: 5px 0;">${campaign.analysis_summary || 'No summary available'}</p>
+                            <button onclick="viewCampaign(${campaign.id})" style="margin-top: 10px; padding: 6px 12px; background: #ffffff; color: #000000; border: none; border-radius: 6px; font-size: 12px; cursor: pointer;">View Details</button>
+                        </div>
+                    `).join('');
+                } else {
+                    campaignsList.innerHTML = '<p style="text-align: center; padding: 20px; color: #888;">No campaigns yet. Start a new campaign above.</p>';
+                }
+            } catch (err) {
+                console.error('Error loading campaigns:', err);
+                const campaignsList = document.getElementById('campaignsList');
+                if (campaignsList) {
+                    campaignsList.innerHTML = '<p style="text-align: center; padding: 20px; color: #ff6666;">Error loading campaigns</p>';
+                }
+            }
+        }
+        
+        async function loadComments(campaignId = null) {
+            try {
+                const url = campaignId 
+                    ? `/api/dashboard/auto-marketer/comments?campaign_id=${campaignId}`
+                    : '/api/dashboard/auto-marketer/comments';
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                const commentsList = document.getElementById('commentsList');
+                if (!commentsList) return;
+                
+                if (data.comments && data.comments.length > 0) {
+                    commentsList.innerHTML = `
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="border-bottom: 1px solid #ffffff;">
+                                        <th style="padding: 12px; text-align: left; color: #ffffff; font-size: 13px;">Platform</th>
+                                        <th style="padding: 12px; text-align: left; color: #ffffff; font-size: 13px;">Comment</th>
+                                        <th style="padding: 12px; text-align: left; color: #ffffff; font-size: 13px;">Status</th>
+                                        <th style="padding: 12px; text-align: left; color: #ffffff; font-size: 13px;">Date</th>
+                                        <th style="padding: 12px; text-align: left; color: #ffffff; font-size: 13px;">Link</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${data.comments.map(comment => `
+                                        <tr style="border-bottom: 1px solid #333;">
+                                            <td style="padding: 12px; color: #e0e8f0; font-size: 12px; text-transform: capitalize;">${comment.platform}</td>
+                                            <td style="padding: 12px; color: #e0e8f0; font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${comment.comment}">${comment.comment.substring(0, 50)}...</td>
+                                            <td style="padding: 12px;">
+                                                <span style="background: ${comment.status === 'posted' ? '#28a745' : '#ff6666'}; color: #ffffff; padding: 4px 8px; border-radius: 4px; font-size: 11px;">${comment.status}</span>
+                                            </td>
+                                            <td style="padding: 12px; color: #e0e8f0; font-size: 12px;">${new Date(comment.posted_at).toLocaleString()}</td>
+                                            <td style="padding: 12px;">
+                                                ${comment.comment_url ? `<a href="${comment.comment_url}" target="_blank" style="color: #ffffff; text-decoration: underline; font-size: 12px;">View</a>` : '-'}
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                } else {
+                    commentsList.innerHTML = '<p style="text-align: center; padding: 20px; color: #888;">No comments posted yet.</p>';
+                }
+            } catch (err) {
+                console.error('Error loading comments:', err);
+                const commentsList = document.getElementById('commentsList');
+                if (commentsList) {
+                    commentsList.innerHTML = '<p style="text-align: center; padding: 20px; color: #ff6666;">Error loading comments</p>';
+                }
+            }
+        }
+        
+        // Start campaign
+        const startCampaignBtn = document.getElementById('startCampaignBtn');
+        if (startCampaignBtn) {
+            startCampaignBtn.addEventListener('click', async () => {
+            const companyUrl = document.getElementById('companyUrl').value.trim();
+            const statusDiv = document.getElementById('campaignStatus');
+            
+            if (!companyUrl) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#ff6666';
+                statusDiv.style.borderColor = '#ff6666';
+                statusDiv.innerHTML = '<span style="color: #ffffff;">Please enter a company website URL</span>';
+                return;
+            }
+            
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = '#152028';
+            statusDiv.style.borderColor = '#ffffff';
+            statusDiv.innerHTML = '<span style="color: #ffffff;">Starting campaign... Please wait.</span>';
+            
+            try {
+                // First, get API key if available
+                const dashboardData = await fetch('/api/dashboard/init').then(r => r.json());
+                const apiKey = dashboardData.api_keys && dashboardData.api_keys.length > 0 ? dashboardData.api_keys[0].api_key : null;
+                
+                if (!apiKey) {
+                    statusDiv.style.background = '#ff6666';
+                    statusDiv.innerHTML = '<span style="color: #ffffff;">Error: No API key found. Please create one in the Dashboard first.</span>';
+                    return;
+                }
+                
+                const response = await fetch('/api/v1/auto-marketer/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
+                    body: JSON.stringify({
+                        company_url: companyUrl,
+                        social_credentials: {} // Users can add credentials later
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    statusDiv.style.background = '#28a745';
+                    statusDiv.innerHTML = `<span style="color: #ffffff;">Campaign started successfully! Campaign ID: ${data.campaign_id}</span>`;
+                    document.getElementById('companyUrl').value = '';
+                    await loadCampaigns();
+                    await loadComments();
+                } else {
+                    statusDiv.style.background = '#ff6666';
+                    statusDiv.innerHTML = `<span style="color: #ffffff;">Error: ${data.error || data.message || 'Failed to start campaign'}</span>`;
+                }
+            } catch (err) {
+                statusDiv.style.background = '#ff6666';
+                statusDiv.innerHTML = `<span style="color: #ffffff;">Error: ${err.message}</span>`;
+            }
+            });
+        }
+        
+        function viewCampaign(campaignId) {
+            alert(`Campaign ID: ${campaignId}\n\nView campaign details and comments.`);
+            loadComments(campaignId);
+        }
 
         // File upload handling with SSE streaming
         // Initialize file input on page load

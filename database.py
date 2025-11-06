@@ -113,11 +113,48 @@ class Database:
             )
         ''')
         
+        # Auto marketer campaigns table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS auto_marketer_campaigns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                company_url TEXT NOT NULL,
+                company_field TEXT,
+                company_offerings TEXT,
+                markdown_content TEXT,
+                analysis_summary TEXT,
+                status TEXT DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        
+        # Posted comments tracking table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS posted_comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                platform TEXT NOT NULL,
+                post_url TEXT NOT NULL,
+                comment TEXT NOT NULL,
+                comment_id TEXT,
+                comment_url TEXT,
+                status TEXT DEFAULT 'posted',
+                error_message TEXT,
+                posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (campaign_id) REFERENCES auto_marketer_campaigns(id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        
         # Initialize default service costs
         default_costs = [
             ('email_finder', '/api/v1/email-finder', 0.01, 'Find emails from a single URL'),
             ('email_finder_csv', '/api/v1/email-finder/csv', 0.05, 'Process CSV file with multiple URLs'),
             ('osm_scraper', '/api/v1/osm-scraper', 0.02, 'Scrape OpenStreetMap data for a city'),
+            ('auto_marketer', '/api/v1/auto-marketer/start', 0.10, 'Start auto marketing campaign'),
         ]
         
         for service, endpoint, cost, desc in default_costs:
@@ -401,4 +438,156 @@ class Database:
         conn.close()
         
         return transactions
+    
+    def create_campaign(self, user_id: int, company_url: str, company_field: str = None,
+                       company_offerings: str = None, markdown_content: str = None,
+                       analysis_summary: str = None) -> int:
+        """Create a new auto marketer campaign"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO auto_marketer_campaigns 
+            (user_id, company_url, company_field, company_offerings, markdown_content, analysis_summary)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (user_id, company_url, company_field, company_offerings, markdown_content, analysis_summary))
+        
+        campaign_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Created campaign {campaign_id} for user {user_id}")
+        return campaign_id
+    
+    def get_campaign(self, campaign_id: int) -> Optional[Dict]:
+        """Get campaign by ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM auto_marketer_campaigns WHERE id = ?', (campaign_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        return dict(result) if result else None
+    
+    def get_user_campaigns(self, user_id: int, limit: int = 50) -> List[Dict]:
+        """Get all campaigns for a user"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM auto_marketer_campaigns
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        ''', (user_id, limit))
+        
+        campaigns = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return campaigns
+    
+    def save_comment(self, campaign_id: int, user_id: int, platform: str, post_url: str,
+                    comment: str, comment_id: str = None, comment_url: str = None,
+                    status: str = 'posted', error_message: str = None) -> int:
+        """Save a posted comment to the database"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO posted_comments
+            (campaign_id, user_id, platform, post_url, comment, comment_id, comment_url, status, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (campaign_id, user_id, platform, post_url, comment, comment_id, comment_url, status, error_message))
+        
+        comment_db_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Saved comment {comment_db_id} for campaign {campaign_id}")
+        return comment_db_id
+    
+    def get_campaign_comments(self, campaign_id: int, limit: int = 100) -> List[Dict]:
+        """Get all comments for a campaign"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM posted_comments
+            WHERE campaign_id = ?
+            ORDER BY posted_at DESC
+            LIMIT ?
+        ''', (campaign_id, limit))
+        
+        comments = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return comments
+    
+    def get_user_comments(self, user_id: int, limit: int = 100) -> List[Dict]:
+        """Get all comments posted by a user"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT pc.*, amc.company_url as campaign_url
+            FROM posted_comments pc
+            JOIN auto_marketer_campaigns amc ON pc.campaign_id = amc.id
+            WHERE pc.user_id = ?
+            ORDER BY pc.posted_at DESC
+            LIMIT ?
+        ''', (user_id, limit))
+        
+        comments = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return comments
+    
+    def get_comment_stats(self, campaign_id: int = None, user_id: int = None) -> Dict:
+        """Get statistics about posted comments"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        if campaign_id:
+            cursor.execute('''
+                SELECT 
+                    platform,
+                    status,
+                    COUNT(*) as count
+                FROM posted_comments
+                WHERE campaign_id = ?
+                GROUP BY platform, status
+            ''', (campaign_id,))
+        elif user_id:
+            cursor.execute('''
+                SELECT 
+                    platform,
+                    status,
+                    COUNT(*) as count
+                FROM posted_comments
+                WHERE user_id = ?
+                GROUP BY platform, status
+            ''', (user_id,))
+        else:
+            cursor.execute('''
+                SELECT 
+                    platform,
+                    status,
+                    COUNT(*) as count
+                FROM posted_comments
+                GROUP BY platform, status
+            ''')
+        
+        stats = {}
+        for row in cursor.fetchall():
+            platform = row['platform']
+            status = row['status']
+            count = row['count']
+            
+            if platform not in stats:
+                stats[platform] = {}
+            stats[platform][status] = count
+        
+        conn.close()
+        return stats
 
